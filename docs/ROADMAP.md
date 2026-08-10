@@ -117,8 +117,8 @@ Exit gate:
 Deliverables:
 - Puzzle editor with preview and validation
 - Approved-content export
-- Optional Supabase service for daily puzzles and content updates
-- Cached offline fallback and content version rollback
+- Optional online service for daily puzzles, economy configuration, and content updates
+- Cached offline fallback and content/configuration version rollback
 - Minimal accounts only if cross-device sync is approved
 
 Exit gate:
@@ -142,21 +142,34 @@ Exit gate:
 - All launch puzzles pass final editorial checks.
 - Required disclosures match actual data behavior.
 
-## Phase 9 — Monetization
+## Phase 9 — Ads, coins, timers, and purchases
 
-**Goal:** Add optional revenue without manufacturing frustration.
+**Goal:** Add optional revenue and convenience without manufacturing frustration or blocking the main journey.
 
 Deliverables:
-- Rewarded hint ads, one-time ad removal, optional themed packs and cosmetics
-- Purchase restore and failure handling
-- Child/family and regional compliance review
-- Frequency caps and “no ad available” fallback
-- Economy and price testing
+- Noun Coin earning, spending, balance display, and auditable transaction ledger
+- Three-token hint inventory with one token regenerating every 15 minutes
+- Optional timers for bonus chests, second chances, challenge packs, and exhibit restoration
+- Coin shortcuts and rewarded-ad alternatives for eligible timers
+- Optional rewarded ads for disclosed coins, hints, timer reduction, doubled rewards, chests, or attempt recovery
+- Carefully capped interstitial experiment after every 4–6 completed puzzles at natural transitions only
+- Permanent forced-ad removal
+- Provisional coin packs, optional starter bundle, themed packs, and cosmetics
+- Separate earned/purchased currency accounting
+- Purchase restore, refund, pending transaction, duplicate callback, and failure handling
+- Child/family, consent, platform, and regional compliance review
+- Feature flags, economy configuration versioning, and bundled safe defaults
+- Migration from all pre-economy saves
+- Economy analytics with privacy and retention guardrails
 
 Exit gate:
-- Every core puzzle can be completed for free.
-- Purchases restore correctly.
-- Consent and store disclosures are verified on real devices.
+- Every core puzzle and the main journey remain continuously playable for free.
+- All coin awards, spends, ad rewards, timer skips, and purchase callbacks are idempotent.
+- Timers recover correctly after restart, offline use, timezone change, and reasonable clock changes.
+- Purchased entitlements restore correctly on supported devices.
+- No unavailable or failed ad blocks progression.
+- Consent, age, purchase, ad, privacy, and store disclosures are verified on real devices.
+- Closed-beta evidence shows monetization does not materially harm completion, retention, or perceived fairness.
 
 ## Phase 10 — Closed beta
 
@@ -165,12 +178,14 @@ Exit gate:
 Deliverables:
 - TestFlight and Google Play closed testing
 - Feedback form and issue triage
-- Funnel metrics: tutorial completion, puzzle completion, hint use, return rate
-- Difficulty calibration and device compatibility matrix
+- Funnel metrics: tutorial completion, puzzle completion, hint use, economy use, ad outcomes, and return rate
+- Difficulty and economy calibration
+- Device compatibility matrix
 
 Exit gate:
 - Tutorial completion ≥80%.
 - Crash-free sessions meet the chosen launch threshold.
+- Economy sources and sinks stay within approved balance ranges.
 - No launch blocker remains; confusing puzzles are revised or removed.
 
 ## Phase 11 — Store and launch preparation
@@ -180,7 +195,7 @@ Exit gate:
 Deliverables:
 - Final name availability check, icon, screenshots, preview copy
 - Privacy policy and support page/email
-- Age rating, data safety/privacy labels, ad declarations
+- Age rating, data safety/privacy labels, ad declarations, and in-app purchase metadata
 - Release notes, rollback plan, support response templates
 - Unique build numbers and signed production builds
 
@@ -195,8 +210,9 @@ Exit gate:
 
 Deliverables:
 - Staged rollout
-- Crash, review, support, and puzzle-quality monitoring
+- Crash, review, support, puzzle-quality, economy, and ad monitoring
 - Content calendar and monthly puzzle packs
+- Economy adjustment and rollback procedure
 - Hotfix process and content rollback
 - Post-launch review at 24 hours, 7 days, and 30 days
 
@@ -212,3 +228,4 @@ Exit gate:
 4. Author and review 10 puzzles.
 5. Build Phase 4 only.
 6. Playtest before starting signature features.
+7. Implement Phase 9 only after core-loop and retention validation.
