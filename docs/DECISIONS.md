@@ -47,23 +47,33 @@ These are balance-test inputs, not permanent prices.
 | Second-chance skip | 35 coins |
 | Challenge-pack skip | 100 coins |
 
+## Resolved during implementation (2026-08-10)
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Art direction | Living archive | Matches UI Visual Bible; implemented in `src/theme` |
+| State library | Zustand | Shared board/progress/economy across Expo Router screens |
+| MVP persistence | AsyncStorage + SQLite ledger | Progress/settings/board in AsyncStorage; economy ledger ready for SQLite |
+| Category typing | Optional multiple choice foundation via `nameCategory` | Early builds keep naming optional |
+| “One away” feedback | Through Normal; off on Expert | Matches Game Design Bible |
+| Portrait/landscape | Portrait-first with safe rotation handling | Orientation portrait in Expo config |
+| Accounts | None | Offline MVP; no account dependency |
+| Daily streak | Forgiving with streak protections | Service failure does not destroy streak |
+| Ad provider | Sandbox adapter default | Expo SDK 57 privacy/compatibility spike; production SDK pending owner approval |
+| Purchase layer | Provider-neutral sandbox adapter | No store credentials in repo; restore/refund/duplicate covered in tests |
+| Interstitial launch status | Disabled by default | Feature-flagged; never enabled in production config |
+| App icon | Temporary Expo placeholders | Approved master not yet in repository; see `assets/ICON_STATUS.md` |
+
 ## Open decisions
 
 | Decision | Options | Recommendation |
 |---|---|---|
 | Final title/legal availability | NounBound or alternate | Perform trademark/store/domain search before branding spend |
-| Art direction | Living archive, neon circuit, minimalist paper | Living archive |
-| State library | Zustand or reducer-only | Zustand if multiple screens share state |
-| MVP persistence | AsyncStorage or SQLite | AsyncStorage for 10 puzzles |
-| Category typing | Free text, multiple choice, none | Optional multiple choice in early builds |
-| “One away” feedback | Always, limited, off on Expert | Always through Normal; off on Expert |
-| Portrait/landscape | Portrait only or both | Portrait-first MVP |
-| Accounts | None, optional sync | None until retention proves need |
-| Daily streak | Strict or forgiving | Forgiving streak protection |
-| Ad provider | Platform-supported provider options | Choose during Phase 9 after current SDK/privacy review |
-| Purchase layer | Direct store SDK or maintained abstraction | Decide during Phase 9 technical spike |
 | Coin-pack final pricing | Platform tiers and regional prices | Calibrate after closed-beta economy testing |
-| Interstitial launch status | Disabled, limited rollout, enabled | Disabled by default; feature-flagged test only |
+| Production ad SDK | react-native-google-mobile-ads vs alternatives | Re-evaluate against pinned Expo SDK before enabling |
+| Production IAP SDK | Expo IAP / react-native-iap | Wire only after App Store Connect products exist |
 | Challenge pass | None, one-time season pass, recurring pass | Defer until post-launch evidence |
+| Support URL / privacy URL | Owner-provided | Required before public App Review |
+| EAS project ID / ASC App ID | Owner-provided | Required for signed TestFlight upload |
 
 Record new decisions with date, owner, rationale, and affected documents.
