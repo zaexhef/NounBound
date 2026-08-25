@@ -101,13 +101,11 @@ export default function ResultsScreen() {
             label="Record Clever Connection"
             variant="secondary"
             onPress={async () => {
+              // Prefer a solved group as a legitimate alternate candidate seed.
+              const words =
+                board?.solvedGroups[0]?.words ?? puzzle.groups[0]!.words;
               await submitClever({
-                words: (board?.selectedWords.slice(0, 4) as [
-                  string,
-                  string,
-                  string,
-                  string,
-                ]) ?? puzzle.groups[0]!.words,
+                words,
                 connection: "Player alternate",
                 note: "Stored locally as pending — not yet submitted to a backend.",
               });

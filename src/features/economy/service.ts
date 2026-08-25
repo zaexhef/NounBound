@@ -67,16 +67,20 @@ export function rewardForDifficulty(
 
 export class EconomyService {
   constructor(
-    private store: EconomyStore = getEconomyStore(),
+    private storeOverride: EconomyStore | null = null,
     private config: EconomyConfig = defaultEconomyConfig,
   ) {}
+
+  private store(): EconomyStore {
+    return this.storeOverride ?? getEconomyStore();
+  }
 
   setConfig(config: EconomyConfig) {
     this.config = config;
   }
 
   async getBalances() {
-    const b = await this.store.getBalances();
+    const b = await this.store().getBalances();
     return {
       ...b,
       usableBalance: usable(b.earnedCoinBalance, b.purchasedCoinBalance),
@@ -92,8 +96,9 @@ export class EconomyService {
     relatedPurchaseId?: string;
     asPurchased?: boolean;
   }): Promise<EconomyOperationResult> {
-    const existing = await this.store.findByIdempotencyKey(input.idempotencyKey);
-    const balances = await this.store.getBalances();
+    const store = this.store();
+    const existing = await store.findByIdempotencyKey(input.idempotencyKey);
+    const balances = await store.getBalances();
     if (existing) {
       return {
         ok: true,
@@ -136,8 +141,8 @@ export class EconomyService {
       economyConfigVersion: this.config.version,
     };
 
-    await this.store.appendEntry(entry);
-    await this.store.setBalances({
+    await store.appendEntry(entry);
+    await store.setBalances({
       earnedCoinBalance: resultingEarned,
       purchasedCoinBalance: resultingPurchased,
     });
@@ -162,8 +167,9 @@ export class EconomyService {
     relatedPuzzleId?: string;
     relatedTimerId?: string;
   }): Promise<EconomyOperationResult> {
-    const existing = await this.store.findByIdempotencyKey(input.idempotencyKey);
-    const balances = await this.store.getBalances();
+    const store = this.store();
+    const existing = await store.findByIdempotencyKey(input.idempotencyKey);
+    const balances = await store.getBalances();
     if (existing) {
       return {
         ok: true,
@@ -227,8 +233,8 @@ export class EconomyService {
       economyConfigVersion: this.config.version,
     };
 
-    await this.store.appendEntry(entry);
-    await this.store.setBalances({
+    await store.appendEntry(entry);
+    await store.setBalances({
       earnedCoinBalance: resultingEarned,
       purchasedCoinBalance: resultingPurchased,
     });
@@ -248,7 +254,8 @@ export class EconomyService {
     earned: number;
     purchased: number;
   }> {
-    const entries = await this.store.listEntries();
+    const store = this.store();
+    const entries = await store.listEntries();
     let earned = 0;
     let purchased = 0;
     for (const e of entries) {
@@ -258,7 +265,7 @@ export class EconomyService {
     if (earned < 0 || purchased < 0) {
       return { ok: false, earned, purchased };
     }
-    await this.store.setBalances({
+    await store.setBalances({
       earnedCoinBalance: earned,
       purchasedCoinBalance: purchased,
     });

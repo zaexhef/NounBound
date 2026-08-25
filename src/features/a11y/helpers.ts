@@ -7,6 +7,9 @@ export function mistakesAccessibilityLabel(remaining: number): string {
 }
 
 export function countdownAccessibilityLabel(label: string, countdown: string): string {
+  if (/^full$/i.test(countdown.trim())) {
+    return `${label}: full`;
+  }
   return `${label}: ${countdown} remaining`;
 }
 

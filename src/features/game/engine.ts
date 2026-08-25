@@ -12,10 +12,14 @@ export interface SolvedGroupState {
 export interface HintState {
   /** Progressive stage 0–4; 0 means no hints used for that group focus. */
   stage: number;
+  /** Pinned unsolved group while a progressive hint sequence is active. */
+  focusedGroupId?: string;
   lockedWord?: string;
   removedWord?: string;
   revealedLabel?: string;
   broadSubject?: string;
+  /** True when the last requestHint call changed board assistance state. */
+  applied?: boolean;
 }
 
 export interface BoardState {
@@ -194,9 +198,12 @@ export function toggleCard(state: BoardState, word: string): BoardState {
   const selectedNorm = state.selectedWords.map(normalizeNoun);
   const wordNorm = normalizeNoun(word);
   const exists = selectedNorm.includes(wordNorm);
+  const locked = state.lockedHintWords.map(normalizeNoun);
 
   let selectedWords: string[];
   if (exists) {
+    // Locked hint nouns cannot be deselected.
+    if (locked.includes(wordNorm)) return state;
     selectedWords = state.selectedWords.filter(
       (w) => normalizeNoun(w) !== wordNorm,
     );
@@ -215,9 +222,12 @@ export function toggleCard(state: BoardState, word: string): BoardState {
 
 export function clearSelection(state: BoardState): BoardState {
   if (state.status !== "playing") return state;
+  const lockedNorm = new Set(state.lockedHintWords.map(normalizeNoun));
   return {
     ...state,
-    selectedWords: [],
+    selectedWords: state.selectedWords.filter((w) =>
+      lockedNorm.has(normalizeNoun(w)),
+    ),
     oneAwayVisible: false,
     lastMessage: null,
   };
@@ -349,30 +359,44 @@ export function requestHint(
   const unsolved = puzzle.groups.filter(
     (g) => !state.solvedGroups.some((s) => s.groupId === g.id),
   );
-  if (unsolved.length === 0) return state;
+  if (unsolved.length === 0) {
+    return { ...state, lastMessage: "No unsolved groups remain.", hintState: { ...state.hintState, applied: false } };
+  }
 
-  // Focus the group with the most selected overlap, else first unsolved.
+  const pinned = state.hintState.focusedGroupId
+    ? unsolved.find((g) => g.id === state.hintState.focusedGroupId)
+    : undefined;
+  // Pin focus for the progressive sequence; only re-pick when starting a new sequence.
   const focus =
+    pinned ??
     unsolved
       .map((g) => ({
         group: g,
         overlap: countOverlap(state.selectedWords, g.words),
       }))
-      .sort((a, b) => b.overlap - a.overlap)[0]?.group ?? unsolved[0]!;
+      .sort((a, b) => b.overlap - a.overlap)[0]?.group ??
+    unsolved[0]!;
 
   const stage = state.hintState.stage + 1;
   if (stage > 4) {
     return {
       ...state,
       lastMessage: "No further hints for this group.",
+      hintState: { ...state.hintState, applied: false },
     };
   }
 
-  let hintState: HintState = { ...state.hintState, stage };
+  let hintState: HintState = {
+    ...state.hintState,
+    stage,
+    focusedGroupId: focus.id,
+    applied: true,
+  };
   let lockedHintWords = [...state.lockedHintWords];
   let removedWords = [...state.removedWords];
   let selectedWords = [...state.selectedWords];
   let lastMessage = "";
+  let applied = true;
 
   if (stage === 1) {
     const broad = focus.hints[0];
@@ -384,10 +408,17 @@ export function requestHint(
         (w) => !lockedHintWords.map(normalizeNoun).includes(normalizeNoun(w)),
       ) ?? focus.words[0]!;
     lockedHintWords = [...lockedHintWords, word];
-    if (
-      selectedWords.length < MAX_SELECTION &&
-      !selectedWords.map(normalizeNoun).includes(normalizeNoun(word))
-    ) {
+    if (!selectedWords.map(normalizeNoun).includes(normalizeNoun(word))) {
+      if (selectedWords.length >= MAX_SELECTION) {
+        const unlockedIndex = selectedWords.findIndex(
+          (w) => !lockedHintWords.map(normalizeNoun).includes(normalizeNoun(w)),
+        );
+        if (unlockedIndex >= 0) {
+          selectedWords = selectedWords.filter((_, i) => i !== unlockedIndex);
+        } else {
+          selectedWords = selectedWords.slice(0, MAX_SELECTION - 1);
+        }
+      }
       selectedWords = [...selectedWords, word];
     }
     hintState = { ...hintState, lockedWord: word };
@@ -405,6 +436,8 @@ export function requestHint(
       lastMessage = `Removed: ${decoy}`;
     } else {
       lastMessage = "No deceptive candidate left to remove.";
+      applied = false;
+      hintState = { ...hintState, applied: false };
     }
   } else {
     hintState = { ...hintState, revealedLabel: focus.connection };
@@ -417,7 +450,7 @@ export function requestHint(
     lockedHintWords,
     removedWords,
     selectedWords,
-    hintsUsed: state.hintsUsed + 1,
+    hintsUsed: applied ? state.hintsUsed + 1 : state.hintsUsed,
     lastMessage,
     oneAwayVisible: false,
   };

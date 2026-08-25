@@ -30,6 +30,17 @@ Blocked:
 - No Apple certificates, provisioning profiles, or App Store Connect API keys in the environment
 - Public App Review was not started
 
-## App icon
+## Bugfix pass — 2026-08-25
 
-Approved master icon not present in the repository. Temporary Expo template icons remain; see `assets/ICON_STATUS.md`.
+Fixed blockers/critical defects found in audit:
+- Win/loss no longer restarts the active puzzle
+- Economy service reads the active SQLite/memory store dynamically
+- Journey restoration/connection nodes mark progress complete
+- Submit re-entrancy lock; replay no longer farms Insight/solves
+- Hint inventory + ad-removal entitlements persist across restart
+- Locked hint nouns cannot be deselected; hint focus is pinned
+- Hint tokens only spent when a hint actually applies
+- Local day-key streak math; chain_walker achievement; daily completion fields
+- Clever Connection / cosmetic unlock / silent hint failure UX fixes
+
+Automated gates after fix: 9 suites / 37 tests, typecheck, lint.

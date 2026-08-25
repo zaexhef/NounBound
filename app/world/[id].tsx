@@ -14,6 +14,7 @@ export default function WorldScreen() {
   const world = getWorld(id as WorldId);
   const completed =
     useAppStore((s) => s.progress.worldProgress[id ?? ""]?.completedNodeIds) ?? [];
+  const completeJourneyNode = useAppStore((s) => s.completeJourneyNode);
 
   if (!world) {
     return (
@@ -39,21 +40,33 @@ export default function WorldScreen() {
             return (
               <Pressable
                 key={node.id}
-                disabled={!unlocked || (!node.puzzleId && node.type !== "restoration" && node.type !== "connection")}
+                disabled={
+                  !unlocked ||
+                  (!node.puzzleId &&
+                    node.type !== "restoration" &&
+                    node.type !== "connection")
+                }
                 accessibilityState={{ disabled: !unlocked }}
                 accessibilityLabel={`${node.title}, ${node.type}${done ? ", completed" : ""}`}
-                onPress={() => {
+                onPress={async () => {
                   if (node.type === "connection" && node.connectsToWorld) {
-                    router.push({ pathname: "/world/[id]", params: { id: node.connectsToWorld } });
+                    await completeJourneyNode(world.id, node.id);
+                    router.push({
+                      pathname: "/world/[id]",
+                      params: { id: node.connectsToWorld },
+                    });
                     return;
                   }
                   if (node.type === "restoration") {
+                    await completeJourneyNode(world.id, node.id);
                     router.push({
                       pathname: "/chain",
                       params: {
                         from: node.id,
                         noun: "Restoration",
                         toWorld: world.nextWorld ?? "",
+                        worldId: world.id,
+                        nodeId: node.id,
                       },
                     });
                     return;
