@@ -30,6 +30,11 @@ Blocked:
 - No Apple certificates, provisioning profiles, or App Store Connect API keys in the environment
 - Public App Review was not started
 
+<<<<<<< HEAD
+## App icon
+
+Approved master icon not present in the repository. Temporary Expo template icons remain; see `assets/ICON_STATUS.md`.
+=======
 ## Bugfix pass — 2026-08-25
 
 Fixed blockers/critical defects found in audit:
@@ -44,3 +49,4 @@ Fixed blockers/critical defects found in audit:
 - Clever Connection / cosmetic unlock / silent hint failure UX fixes
 
 Automated gates after fix: 9 suites / 37 tests, typecheck, lint.
+>>>>>>> cursor/build-nounbound-complete-game-97e4
