@@ -15,18 +15,33 @@ import { getPuzzleById } from "@/features/content/loader";
 import { NounBoundPuzzle } from "@/features/content/schema";
 import {
   loadActiveBoard,
+  loadEntitlements,
+  loadHintInventoryRaw,
   loadProgress,
   loadSettings,
   PlayerProgress,
   PlayerSettings,
   saveActiveBoard,
+  saveEntitlements,
+  saveHintInventory,
   saveProgress,
   saveSettings,
   createDefaultProgress,
   createDefaultSettings,
+  SAVE_KEYS,
 } from "@/features/save/persistence";
-import { applyPuzzleCompletion, createCleverSubmission, CleverConnectionSubmission } from "@/features/progression/service";
-import { getFeatureFlags, getEconomyConfig, FeatureFlags, EconomyConfig } from "@/features/config";
+import {
+  applyPuzzleCompletion,
+  completeJourneyNode,
+  createCleverSubmission,
+  CleverConnectionSubmission,
+} from "@/features/progression/service";
+import {
+  getFeatureFlags,
+  getEconomyConfig,
+  FeatureFlags,
+  EconomyConfig,
+} from "@/features/config";
 import { economyService } from "@/features/economy/service";
 import {
   consumeHintToken,
@@ -37,15 +52,15 @@ import {
 } from "@/features/timers/service";
 import { initSqliteEconomyStore } from "@/features/save/sqlite";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { SAVE_KEYS } from "@/features/save/persistence";
 
 interface AppState {
   hydrated: boolean;
+  submitting: boolean;
   progress: PlayerProgress;
   settings: PlayerSettings;
   board: BoardState | null;
   activePuzzle: NounBoundPuzzle | null;
-  journeyContext: { worldId?: string; nodeId?: string } | null;
+  journeyContext: { worldId?: string; nodeId?: string; isDaily?: boolean; usedDailyFallback?: boolean } | null;
   flags: FeatureFlags;
   economyConfig: EconomyConfig;
   hintInventory: HintInventory;
@@ -58,7 +73,7 @@ interface AppState {
   completeOnboarding: () => Promise<void>;
   startPuzzle: (
     puzzleId: string,
-    context?: { worldId?: string; nodeId?: string },
+    context?: { worldId?: string; nodeId?: string; isDaily?: boolean; usedDailyFallback?: boolean },
   ) => Promise<void>;
   resumeActivePuzzle: () => Promise<boolean>;
   toggleCard: (word: string) => Promise<void>;
@@ -76,7 +91,9 @@ interface AppState {
   refreshEconomy: () => Promise<void>;
   skipHintTimerWithCoins: () => Promise<{ ok: boolean; message: string }>;
   grantSandboxHintFromAd: () => Promise<void>;
-  setAdRemoval: (value: boolean) => void;
+  setAdRemoval: (value: boolean) => Promise<void>;
+  completeJourneyNode: (worldId: string, nodeId: string) => Promise<void>;
+  unlockCosmetics: (ids: string[]) => Promise<void>;
   canSubmit: () => boolean;
 }
 
@@ -84,8 +101,13 @@ async function persistBoard(board: BoardState | null) {
   await saveActiveBoard(board);
 }
 
+async function persistHints(inventory: HintInventory) {
+  await saveHintInventory(inventory);
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   hydrated: false,
+  submitting: false,
   progress: createDefaultProgress(),
   settings: createDefaultSettings(),
   board: null,
@@ -101,18 +123,30 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   hydrate: async () => {
     await initSqliteEconomyStore();
-    const [progress, settings, board, cleverRaw] = await Promise.all([
-      loadProgress(),
-      loadSettings(),
-      loadActiveBoard(),
-      AsyncStorage.getItem(SAVE_KEYS.cleverPending),
-    ]);
+    const [progress, settings, board, cleverRaw, hintRaw, entitlements] =
+      await Promise.all([
+        loadProgress(),
+        loadSettings(),
+        loadActiveBoard(),
+        AsyncStorage.getItem(SAVE_KEYS.cleverPending),
+        loadHintInventoryRaw(),
+        loadEntitlements(),
+      ]);
     const flags = getFeatureFlags();
     const economyConfig = getEconomyConfig();
-    const hintInventory = reconcileHints(
-      createDefaultHintInventory(economyConfig),
-      economyConfig,
-    );
+    const defaults = createDefaultHintInventory(economyConfig);
+    const loadedHints: HintInventory =
+      hintRaw && typeof hintRaw === "object"
+        ? {
+            tokenCount: Math.min(
+              economyConfig.hints.capacity,
+              Math.max(0, Number((hintRaw as HintInventory).tokenCount) || 0),
+            ),
+            capacity: economyConfig.hints.capacity,
+            nextHintAt: (hintRaw as HintInventory).nextHintAt ?? null,
+          }
+        : defaults;
+    const hintInventory = reconcileHints(loadedHints, economyConfig);
     let usableCoins = 0;
     if (flags.economyEnabled) {
       const balances = await economyService.getBalances();
@@ -121,19 +155,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     const cleverPending = cleverRaw
       ? (JSON.parse(cleverRaw) as CleverConnectionSubmission[])
       : [];
-    const activePuzzle = board ? getPuzzleById(board.puzzleId) ?? null : null;
+    let activeBoard = board;
+    let activePuzzle = board ? getPuzzleById(board.puzzleId) ?? null : null;
+    if (board && !activePuzzle) {
+      // Unknown/retired puzzle id — clear invalid resume without silently mutating known boards.
+      activeBoard = null;
+      await persistBoard(null);
+    }
     set({
       hydrated: true,
       progress,
       settings,
-      board,
+      board: activeBoard,
       activePuzzle,
       flags,
       economyConfig,
       hintInventory,
       usableCoins,
+      hasAdRemoval: entitlements.hasAdRemoval,
       cleverPending,
     });
+    await persistHints(hintInventory);
   },
 
   updateSettings: async (patch) => {
@@ -161,6 +203,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       activePuzzle: puzzle,
       journeyContext: context ?? null,
       lastScoreBreakdown: null,
+      submitting: false,
     });
     await persistBoard(board);
   },
@@ -176,7 +219,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   toggleCard: async (word) => {
     const { board } = get();
-    if (!board) return;
+    if (!board || board.status !== "playing") return;
     const next = toggleCard(board, word);
     set({ board: next });
     await persistBoard(next);
@@ -184,22 +227,36 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clearSelection: async () => {
     const { board } = get();
-    if (!board) return;
+    if (!board || board.status !== "playing") return;
     const next = clearSelection(board);
     set({ board: next });
     await persistBoard(next);
   },
 
   submit: async () => {
-    const { board, activePuzzle, progress, journeyContext, flags, economyConfig } = get();
-    if (!board || !activePuzzle) return;
+    const {
+      board,
+      activePuzzle,
+      progress,
+      journeyContext,
+      flags,
+      economyConfig,
+      submitting,
+    } = get();
+    if (!board || !activePuzzle || board.status !== "playing" || submitting) return;
+
     const next = submitSelection(board, activePuzzle);
+    // Lock terminal state immediately to prevent double-submit races.
+    set({ board: next, submitting: next.status !== "playing" });
+
     let nextProgress = progress;
     let lastScoreBreakdown = get().lastScoreBreakdown;
 
     if (next.status === "won" || next.status === "lost") {
       const chain =
-        next.status === "won" && activePuzzle.chainNextPuzzleId && activePuzzle.chainRevealNoun
+        next.status === "won" &&
+        activePuzzle.chainNextPuzzleId &&
+        activePuzzle.chainRevealNoun
           ? {
               toPuzzleId: activePuzzle.chainNextPuzzleId,
               noun: activePuzzle.chainRevealNoun,
@@ -209,6 +266,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         worldId: journeyContext?.worldId,
         nodeId: journeyContext?.nodeId,
         chain,
+        isDaily: journeyContext?.isDaily,
+        usedDailyFallback: journeyContext?.usedDailyFallback,
       });
       if (next.status === "won") {
         lastScoreBreakdown = calculateScore({
@@ -250,49 +309,80 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       }
       await saveProgress(nextProgress);
+      set({ progress: nextProgress, lastScoreBreakdown });
+      await persistBoard(null);
+      set({ submitting: false });
+      return;
     }
 
-    set({ board: next, progress: nextProgress, lastScoreBreakdown });
-    await persistBoard(next.status === "playing" ? next : null);
+    set({ lastScoreBreakdown });
+    await persistBoard(next);
+    set({ submitting: false });
   },
 
   hint: async () => {
-    const { board, activePuzzle, flags, hintInventory, economyConfig, settings } = get();
+    const { board, activePuzzle, flags, hintInventory, economyConfig } = get();
     if (!board || !activePuzzle) return { ok: false, message: "No active puzzle" };
+    if (board.status !== "playing") return { ok: false, message: "Puzzle is not active" };
+
+    const next = requestHint(board, activePuzzle);
+    const applied = next.hintState.applied !== false && next !== board;
+    const meaningful =
+      next.hintsUsed > board.hintsUsed ||
+      next.lockedHintWords.length !== board.lockedHintWords.length ||
+      next.removedWords.length !== board.removedWords.length ||
+      next.hintState.revealedLabel !== board.hintState.revealedLabel ||
+      next.hintState.broadSubject !== board.hintState.broadSubject;
+
+    if (!meaningful) {
+      set({ board: { ...next, hintState: { ...next.hintState, applied: false } } });
+      return { ok: false, message: next.lastMessage ?? "No hint available" };
+    }
 
     if (flags.economyEnabled) {
       const consumed = consumeHintToken(hintInventory, economyConfig);
       if (!consumed.ok) {
         return {
           ok: false,
-          message: "No hint tokens available. Wait, spend coins, or watch an eligible ad.",
+          message:
+            "No hint tokens available. Wait, spend coins, or watch an eligible ad.",
         };
       }
       set({ hintInventory: consumed.inventory });
+      await persistHints(consumed.inventory);
     }
 
-    const next = requestHint(board, activePuzzle);
     set({ board: next });
     await persistBoard(next);
-    void settings;
+    void applied;
     return { ok: true, message: next.lastMessage ?? "Hint applied" };
   },
 
   nameCategory: async (groupId, choice) => {
-    const { board, activePuzzle } = get();
+    const { board, activePuzzle, progress } = get();
     if (!board || !activePuzzle) return;
     const next = nameCategory(board, groupId, choice, activePuzzle);
     set({ board: next });
     if (next.status === "won") {
-      set({
-        lastScoreBreakdown: calculateScore({
-          mistakesMade: next.mistakesMade,
-          hintsUsed: next.hintsUsed,
-          categoriesNamedCorrectly: next.categoriesNamedCorrectly,
-          isCategoryCollision: activePuzzle.mode === "category_collision",
-          completed: true,
-        }),
+      const breakdown = calculateScore({
+        mistakesMade: next.mistakesMade,
+        hintsUsed: next.hintsUsed,
+        categoriesNamedCorrectly: next.categoriesNamedCorrectly,
+        isCategoryCollision: activePuzzle.mode === "category_collision",
+        completed: true,
       });
+      // Reflect naming bonus into insight if this was already completed.
+      const insightDelta = breakdown.total - (get().lastScoreBreakdown?.total ?? next.score);
+      if (insightDelta > 0 && progress.completedPuzzleIds.includes(activePuzzle.id)) {
+        const updated = {
+          ...progress,
+          insightPoints: progress.insightPoints + insightDelta,
+        };
+        set({ progress: updated, lastScoreBreakdown: breakdown });
+        await saveProgress(updated);
+      } else {
+        set({ lastScoreBreakdown: breakdown });
+      }
     }
     await persistBoard(next.status === "playing" ? next : null);
   },
@@ -300,7 +390,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   tick: (deltaMs) => {
     const { board } = get();
     if (!board || board.status !== "playing") return;
-    set({ board: tickElapsed(board, deltaMs) });
+    const next = tickElapsed(board, deltaMs);
+    set({ board: next });
+    // Persist elapsed time every 15s so interruption keeps playtime.
+    if (next.elapsedMs > 0 && next.elapsedMs % 15000 < 1000) {
+      void persistBoard(next);
+    }
   },
 
   resetBoard: async () => {
@@ -312,6 +407,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   submitCleverConnection: async (input) => {
     const { activePuzzle, cleverPending } = get();
     if (!activePuzzle) return;
+    if (!input.words || input.words.length !== 4 || input.words.some((w) => !w)) {
+      return;
+    }
     const submission = createCleverSubmission({
       puzzleId: activePuzzle.id,
       ...input,
@@ -329,27 +427,60 @@ export const useAppStore = create<AppState>((set, get) => ({
   skipHintTimerWithCoins: async () => {
     const { flags, economyConfig, hintInventory } = get();
     if (!flags.economyEnabled) return { ok: false, message: "Economy disabled" };
+    const reconciled = reconcileHints(hintInventory, economyConfig);
+    if (reconciled.tokenCount >= reconciled.capacity) {
+      return { ok: false, message: "Hint tokens already full" };
+    }
+    const idempotencyKey = `hint_skip_${reconciled.nextHintAt ?? "empty"}_${reconciled.tokenCount}`;
     const result = await economyService.spendCoins({
-      idempotencyKey: `hint_skip_${Date.now()}`,
+      idempotencyKey,
       reason: "hint_regeneration",
       amount: economyConfig.sinks.hintRegeneration,
+      relatedTimerId: reconciled.nextHintAt ?? undefined,
     });
     if (!result.ok) return { ok: false, message: result.error ?? "Spend failed" };
+    const granted = grantHintToken(reconciled);
     set({
-      hintInventory: grantHintToken(hintInventory),
+      hintInventory: granted,
       usableCoins: result.usableBalance,
     });
+    await persistHints(granted);
     return { ok: true, message: "Hint token restored" };
   },
 
   grantSandboxHintFromAd: async () => {
-    set({ hintInventory: grantHintToken(get().hintInventory) });
+    const granted = grantHintToken(get().hintInventory);
+    set({ hintInventory: granted });
+    await persistHints(granted);
   },
 
-  setAdRemoval: (value) => set({ hasAdRemoval: value }),
+  setAdRemoval: async (value) => {
+    set({ hasAdRemoval: value });
+    await saveEntitlements({ hasAdRemoval: value });
+  },
+
+  completeJourneyNode: async (worldId, nodeId) => {
+    const progress = completeJourneyNode(get().progress, worldId, nodeId);
+    set({ progress });
+    await saveProgress(progress);
+  },
+
+  unlockCosmetics: async (ids) => {
+    const progress = get().progress;
+    const unlockedCardBacks = [...progress.cosmetics.unlockedCardBacks];
+    for (const id of ids) {
+      if (!unlockedCardBacks.includes(id)) unlockedCardBacks.push(id);
+    }
+    const next = {
+      ...progress,
+      cosmetics: { ...progress.cosmetics, unlockedCardBacks },
+    };
+    set({ progress: next });
+    await saveProgress(next);
+  },
 
   canSubmit: () => {
-    const { board } = get();
-    return board ? canSubmit(board) : false;
+    const { board, submitting } = get();
+    return !!board && !submitting && canSubmit(board);
   },
 }));

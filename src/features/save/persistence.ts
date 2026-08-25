@@ -8,6 +8,8 @@ export const SAVE_KEYS = {
   settings: "@nounbound/save/settings",
   economy: "@nounbound/save/economy",
   cleverPending: "@nounbound/save/cleverPending",
+  hintInventory: "@nounbound/save/hintInventory",
+  entitlements: "@nounbound/save/entitlements",
 } as const;
 
 export interface SaveMeta {
@@ -236,6 +238,33 @@ export async function saveActiveBoard(board: BoardState | null): Promise<void> {
 
 export async function clearAllSaves(): Promise<void> {
   await AsyncStorage.multiRemove(Object.values(SAVE_KEYS));
+}
+
+export interface PersistedEntitlements {
+  hasAdRemoval: boolean;
+}
+
+export async function loadHintInventoryRaw(): Promise<unknown | null> {
+  return readJson(SAVE_KEYS.hintInventory);
+}
+
+export async function saveHintInventory(inventory: {
+  tokenCount: number;
+  capacity: number;
+  nextHintAt: string | null;
+}): Promise<void> {
+  await writeJson(SAVE_KEYS.hintInventory, inventory);
+}
+
+export async function loadEntitlements(): Promise<PersistedEntitlements> {
+  const raw = await readJson<PersistedEntitlements>(SAVE_KEYS.entitlements);
+  return { hasAdRemoval: Boolean(raw?.hasAdRemoval) };
+}
+
+export async function saveEntitlements(
+  entitlements: PersistedEntitlements,
+): Promise<void> {
+  await writeJson(SAVE_KEYS.entitlements, entitlements);
 }
 
 /**

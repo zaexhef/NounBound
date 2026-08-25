@@ -44,8 +44,12 @@ export function levelFromInsight(insightPoints: number): number {
   return Math.max(1, Math.floor(insightPoints / 2500) + 1);
 }
 
+/** Local calendar day key YYYY-MM-DD — consistent with streak diff math. */
 export function dayKey(date = new Date()): string {
-  return date.toISOString().slice(0, 10);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 /**
@@ -70,12 +74,10 @@ export function applyForgivingStreak(
   if (!stats.lastPlayDay) {
     stats.currentStreak = 1;
   } else {
-    const last = new Date(stats.lastPlayDay);
-    const diffDays = Math.floor(
-      (Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) -
-        Date.UTC(last.getFullYear(), last.getMonth(), last.getDate())) /
-        86400000,
-    );
+    const [ly, lm, ld] = stats.lastPlayDay.split("-").map(Number);
+    const lastUtc = Date.UTC(ly!, (lm ?? 1) - 1, ld ?? 1);
+    const nowUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    const diffDays = Math.floor((nowUtc - lastUtc) / 86400000);
     if (diffDays <= 1) {
       stats.currentStreak += 1;
     } else if (diffDays === 2 && stats.streakProtections > 0) {
@@ -94,7 +96,13 @@ export function applyPuzzleCompletion(
   progress: PlayerProgress,
   puzzle: NounBoundPuzzle,
   board: BoardState,
-  options?: { worldId?: string; nodeId?: string; chain?: { toPuzzleId: string; noun: string } },
+  options?: {
+    worldId?: string;
+    nodeId?: string;
+    chain?: { toPuzzleId: string; noun: string };
+    isDaily?: boolean;
+    usedDailyFallback?: boolean;
+  },
 ): PlayerProgress {
   let next = { ...progress };
   const stars = board.stars;
@@ -104,22 +112,35 @@ export function applyPuzzleCompletion(
     [puzzle.id]: Math.max(previous, stars) as 0 | 1 | 2 | 3,
   };
 
+  const firstClear =
+    board.status === "won" && !progress.completedPuzzleIds.includes(puzzle.id);
+
   if (board.status === "won") {
-    if (!next.completedPuzzleIds.includes(puzzle.id)) {
+    if (firstClear) {
       next.completedPuzzleIds = [...next.completedPuzzleIds, puzzle.id];
+      next.insightPoints += insightForBoard(board);
+      next.playerLevel = levelFromInsight(next.insightPoints);
+      next.stats = {
+        ...next.stats,
+        solves: next.stats.solves + 1,
+        hintsUsed: next.stats.hintsUsed + board.hintsUsed,
+        perfectBoards:
+          next.stats.perfectBoards +
+          (board.mistakesMade === 0 && board.hintsUsed === 0 ? 1 : 0),
+        totalPlayTimeMs: next.stats.totalPlayTimeMs + board.elapsedMs,
+      };
+      next = applyForgivingStreak(next, { playedToday: true });
+    } else {
+      // Replay: keep best stars only; do not farm insight/solves/streak.
+      next.stats = {
+        ...next.stats,
+        totalPlayTimeMs: next.stats.totalPlayTimeMs + board.elapsedMs,
+      };
     }
-    next.insightPoints += insightForBoard(board);
-    next.playerLevel = levelFromInsight(next.insightPoints);
-    next.stats = {
-      ...next.stats,
-      solves: next.stats.solves + 1,
-      hintsUsed: next.stats.hintsUsed + board.hintsUsed,
-      perfectBoards:
-        next.stats.perfectBoards + (board.mistakesMade === 0 && board.hintsUsed === 0 ? 1 : 0),
-      totalPlayTimeMs: next.stats.totalPlayTimeMs + board.elapsedMs,
-    };
-    next = applyForgivingStreak(next, { playedToday: true });
-    next = unlockAchievements(next, puzzle, board, options);
+    next = unlockAchievements(next, puzzle, board, {
+      ...options,
+      firstClear,
+    });
   } else if (board.status === "lost") {
     next.stats = {
       ...next.stats,
@@ -130,29 +151,10 @@ export function applyPuzzleCompletion(
   }
 
   if (options?.worldId && options.nodeId && board.status === "won") {
-    const world = next.worldProgress[options.worldId] ?? {
-      restored: 0,
-      completedNodeIds: [],
-      finaleComplete: false,
-    };
-    const completedNodeIds = world.completedNodeIds.includes(options.nodeId)
-      ? world.completedNodeIds
-      : [...world.completedNodeIds, options.nodeId];
-    next.worldProgress = {
-      ...next.worldProgress,
-      [options.worldId]: {
-        ...world,
-        completedNodeIds,
-        finaleComplete:
-          world.finaleComplete || options.nodeId.includes("finale"),
-        restored: options.nodeId.includes("restore")
-          ? world.restored + 1
-          : world.restored,
-      },
-    };
+    next = completeJourneyNode(next, options.worldId, options.nodeId);
   }
 
-  if (options?.chain && board.status === "won") {
+  if (options?.chain && board.status === "won" && firstClear) {
     next.chainHistory = [
       ...next.chainHistory,
       {
@@ -166,16 +168,60 @@ export function applyPuzzleCompletion(
       ...next.stats,
       longestChain: Math.max(next.stats.longestChain, next.chainHistory.length),
     };
+    if (!next.achievements.includes("chain_walker")) {
+      next.achievements = [...next.achievements, "chain_walker"];
+    }
+  }
+
+  if (options?.isDaily && board.status === "won") {
+    next.daily = {
+      lastCompletedDay: dayKey(),
+      lastPuzzleId: puzzle.id,
+      usedFallback: Boolean(options.usedDailyFallback),
+    };
   }
 
   return next;
+}
+
+/** Mark a journey node complete (restoration / connection / puzzle). */
+export function completeJourneyNode(
+  progress: PlayerProgress,
+  worldId: string,
+  nodeId: string,
+): PlayerProgress {
+  const world = progress.worldProgress[worldId] ?? {
+    restored: 0,
+    completedNodeIds: [],
+    finaleComplete: false,
+  };
+  if (world.completedNodeIds.includes(nodeId)) {
+    return progress;
+  }
+  const completedNodeIds = [...world.completedNodeIds, nodeId];
+  return {
+    ...progress,
+    worldProgress: {
+      ...progress.worldProgress,
+      [worldId]: {
+        ...world,
+        completedNodeIds,
+        finaleComplete: world.finaleComplete || nodeId.includes("finale"),
+        restored: nodeId.includes("restore") ? world.restored + 1 : world.restored,
+      },
+    },
+    achievements:
+      nodeId.includes("restore") && !progress.achievements.includes("world_restorer")
+        ? [...progress.achievements, "world_restorer"]
+        : progress.achievements,
+  };
 }
 
 function unlockAchievements(
   progress: PlayerProgress,
   puzzle: NounBoundPuzzle,
   board: BoardState,
-  options?: { nodeId?: string },
+  options?: { nodeId?: string; firstClear?: boolean; chain?: { toPuzzleId: string; noun: string } },
 ): PlayerProgress {
   const unlocked = new Set(progress.achievements);
   if (board.status === "won") unlocked.add("first_solve");
@@ -186,9 +232,7 @@ function unlockAchievements(
     unlocked.add("collision_solver");
   }
   if (options?.nodeId?.includes("restore")) unlocked.add("world_restorer");
-  if (progress.chainHistory.length > 0 || options) {
-    // chain achievement granted when chain history grows in caller path
-  }
+  if (options?.chain) unlocked.add("chain_walker");
   if (progress.stats.currentStreak >= 7) unlocked.add("streak_7");
 
   const cosmetics = { ...progress.cosmetics };

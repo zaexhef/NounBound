@@ -60,7 +60,7 @@ export default function RestorePurchasesScreen() {
                 onPress={async () => {
                   const result = await getPurchaseAdapter().purchase(p.productId);
                   if (result.status === "completed" || result.status === "restored") {
-                    if (p.grantsAdRemoval) setAdRemoval(true);
+                    if (p.grantsAdRemoval) await setAdRemoval(true);
                     if (p.coinAmount && flags.economyEnabled) {
                       await economyService.awardCoins({
                         idempotencyKey: `purchase_${result.transactionId}`,
@@ -70,6 +70,9 @@ export default function RestorePurchasesScreen() {
                         asPurchased: true,
                       });
                       await refreshEconomy();
+                    }
+                    if (p.cosmeticIds?.length) {
+                      await useAppStore.getState().unlockCosmetics(p.cosmeticIds);
                     }
                   }
                   setMessage(`Purchase ${result.status}: ${result.transactionId}`);
@@ -83,7 +86,11 @@ export default function RestorePurchasesScreen() {
               const results = await getPurchaseAdapter().restore();
               for (const r of results) {
                 if (r.productId === "ad_removal" || r.productId.includes("ad_removal")) {
-                  setAdRemoval(true);
+                  await setAdRemoval(true);
+                }
+                const product = PROVISIONAL_PRODUCTS.find((p) => p.productId === r.productId);
+                if (product?.cosmeticIds?.length) {
+                  await useAppStore.getState().unlockCosmetics(product.cosmeticIds);
                 }
               }
               setMessage(

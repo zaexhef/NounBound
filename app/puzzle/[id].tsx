@@ -18,10 +18,12 @@ import { useAppStore } from "@/store/appStore";
 import { colors, spacing, typography, worldThemes, WorldId } from "@/theme";
 
 export default function PuzzleBoardScreen() {
-  const { id, worldId, nodeId } = useLocalSearchParams<{
+  const { id, worldId, nodeId, isDaily, usedFallback } = useLocalSearchParams<{
     id: string;
     worldId?: string;
     nodeId?: string;
+    isDaily?: string;
+    usedFallback?: string;
   }>();
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -38,10 +40,18 @@ export default function PuzzleBoardScreen() {
 
   useEffect(() => {
     if (!id) return;
-    if (!board || board.puzzleId !== id || board.status !== "playing") {
-      void startPuzzle(id, { worldId, nodeId });
+    // Only start when missing or for a different puzzle. Never restart won/lost boards.
+    if (!board || board.puzzleId !== id) {
+      void startPuzzle(id, {
+        worldId,
+        nodeId,
+        isDaily: isDaily === "1",
+        usedDailyFallback: usedFallback === "1",
+      });
     }
-  }, [id, worldId, nodeId, board, startPuzzle]);
+    // Intentionally depend on puzzle id, not full board object (avoids win/loss restart loop).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, worldId, nodeId, isDaily, usedFallback, board?.puzzleId, startPuzzle]);
 
   useEffect(() => {
     const timer = setInterval(() => tick(1000), 1000);
@@ -49,14 +59,15 @@ export default function PuzzleBoardScreen() {
   }, [tick]);
 
   useEffect(() => {
-    if (!board) return;
+    if (!board || board.puzzleId !== id) return;
     if (board.status === "won" || board.status === "lost") {
       router.replace({
         pathname: "/results",
         params: { id: board.puzzleId, status: board.status },
       });
     }
-  }, [board, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [board?.status, board?.puzzleId, id, router]);
 
   if (!board || !puzzle) {
     return (
@@ -148,7 +159,16 @@ export default function PuzzleBoardScreen() {
           label="Hint"
           variant="ghost"
           onPress={async () => {
-            await hint();
+            const result = await hint();
+            if (!result.ok && result.message) {
+              // Surface failure via live board message without spending tokens.
+              const current = useAppStore.getState().board;
+              if (current) {
+                useAppStore.setState({
+                  board: { ...current, lastMessage: result.message },
+                });
+              }
+            }
           }}
         />
       </View>

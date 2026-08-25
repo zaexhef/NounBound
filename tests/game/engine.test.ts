@@ -38,6 +38,30 @@ describe("game engine", () => {
     expect(board.selectedWords).toHaveLength(0);
   });
 
+  it("does not allow deselecting locked hint nouns", () => {
+    let board = createBoardState(puzzle, { random: () => 0.15 });
+    board = requestHint(board, puzzle);
+    board = requestHint(board, puzzle);
+    expect(board.lockedHintWords.length).toBe(1);
+    const locked = board.lockedHintWords[0]!;
+    expect(board.selectedWords.map((w) => w.toLowerCase())).toContain(locked.toLowerCase());
+    const after = toggleCard(board, locked);
+    expect(after.selectedWords.map((w) => w.toLowerCase())).toContain(locked.toLowerCase());
+    const cleared = clearSelection(after);
+    expect(cleared.selectedWords.map((w) => w.toLowerCase())).toContain(locked.toLowerCase());
+  });
+
+  it("pins progressive hint focus to one group", () => {
+    let board = createBoardState(puzzle, { random: () => 0.22 });
+    board = requestHint(board, puzzle);
+    const focused = board.hintState.focusedGroupId;
+    expect(focused).toBeTruthy();
+    board = requestHint(board, puzzle);
+    expect(board.hintState.focusedGroupId).toBe(focused);
+    board = requestHint(board, puzzle);
+    expect(board.hintState.focusedGroupId).toBe(focused);
+  });
+
   it("validates groups independent of selection order", () => {
     let board = createBoardState(puzzle, { random: () => 0.2 });
     const group = puzzle.groups[0]!.words;

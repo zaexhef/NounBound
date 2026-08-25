@@ -42,7 +42,14 @@ export default function DailyMysteryScreen() {
         <ArchiveButton
           label="Play Daily Mystery"
           onPress={() =>
-            router.push({ pathname: "/puzzle/[id]", params: { id: puzzle.id } })
+            router.push({
+              pathname: "/puzzle/[id]",
+              params: {
+                id: puzzle.id,
+                isDaily: "1",
+                usedFallback: usedFallback ? "1" : "0",
+              },
+            })
           }
         />
         <ArchiveButton label="Back" variant="ghost" onPress={() => router.back()} />
